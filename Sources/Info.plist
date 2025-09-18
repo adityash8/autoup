@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string></string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.autoup.AutoUp</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSSupportsAutomaticTermination</key>
+	<true/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+	<key>NSUserNotificationAlertStyle</key>
+	<string>alert</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.autoup.background-update-check</string>
+	</array>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Auto-Up needs to send Apple Events to install app updates automatically.</string>
+	<key>NSSystemAdministrationUsageDescription</key>
+	<string>Auto-Up needs administrator privileges to install some app updates.</string>
+	<key>NSFileProviderPresenceUsageDescription</key>
+	<string>Auto-Up scans your Applications folder to detect installed apps and check for updates.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Auto-Up needs to access network volumes to download app updates.</string>
+	<key>SUFeedURL</key>
+	<string>https://autoup.app/sparkle/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string><!-- Sparkle public key will go here --></string>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+</dict>
+</plist>

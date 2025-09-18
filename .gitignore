@@ -1,0 +1,78 @@
+# Xcode
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Build artifacts
+.build/
+build/
+dist/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# Dependencies
+Carthage/
+Pods/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# IDEs
+.vscode/
+.idea/
+
+# Auto-Up specific
+*.log
+cache/
+temp/
+
+# Environment files
+.env
+.env.local
+
+# Code signing
+*.p12
+*.mobileprovision
+*.provisionprofile
+
+# Backup files
+*.orig
+*.bak
+*~
+
+# Temporary files
+*.tmp
+*.temp

@@ -1,0 +1,88 @@
+name: AutoUp
+options:
+  bundleIdPrefix: com.autoup
+  deploymentTarget:
+    macOS: "13.0"
+  developmentLanguage: en
+
+settings:
+  MARKETING_VERSION: 1.0.0
+  CURRENT_PROJECT_VERSION: 1
+  SWIFT_VERSION: 5.9
+  IPHONEOS_DEPLOYMENT_TARGET: 17.0
+  MACOSX_DEPLOYMENT_TARGET: 13.0
+
+targets:
+  AutoUp:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    resources:
+      - Sources/Resources
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleIconName: AppIcon
+        CFBundleIdentifier: com.autoup.AutoUp
+        CFBundleName: Auto-Up
+        CFBundleDisplayName: Auto-Up
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        NSSupportsAutomaticTermination: true
+        NSSupportsSuddenTermination: false
+        NSUserNotificationAlertStyle: alert
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.autoup.background-update-check
+        NSAppleEventsUsageDescription: "Auto-Up needs to send Apple Events to install app updates automatically."
+        NSSystemAdministrationUsageDescription: "Auto-Up needs administrator privileges to install some app updates."
+        NSFileProviderPresenceUsageDescription: "Auto-Up scans your Applications folder to detect installed apps and check for updates."
+        NSNetworkVolumesUsageDescription: "Auto-Up needs to access network volumes to download app updates."
+        SUFeedURL: "https://autoup.app/sparkle/appcast.xml"
+        SUAutomaticallyUpdate: true
+        SUEnableAutomaticChecks: true
+    dependencies:
+      - package: SQLite
+        product: SQLite
+      - package: MLXSwift
+        product: MLX
+      - package: PostHog
+        product: PostHog
+      - package: Sparkle
+        product: Sparkle
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.autoup.AutoUp
+      INFOPLIST_FILE: Sources/Info.plist
+      CODE_SIGN_ENTITLEMENTS: AutoUp.entitlements
+      ENABLE_HARDENED_RUNTIME: true
+      DEVELOPMENT_TEAM: YOUR_TEAM_ID
+
+packages:
+  SQLite:
+    url: https://github.com/stephencelis/SQLite.swift
+    from: 0.14.1
+  MLXSwift:
+    url: https://github.com/ml-explore/mlx-swift
+    from: 0.10.0
+  PostHog:
+    url: https://github.com/PostHog/posthog-ios
+    from: 3.0.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.5.0
+
+schemes:
+  AutoUp:
+    build:
+      targets:
+        AutoUp: all
+    run:
+      config: Debug
+      askForAppToLaunch: false
+    test:
+      config: Debug
+      targets:
+        - AutoUpTests
+    archive:
+      config: Release
