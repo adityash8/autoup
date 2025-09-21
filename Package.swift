@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AutoUp",
     platforms: [
-        .macOS(.v13)
+        .macOS("13.3")
     ],
     products: [
         .executable(
