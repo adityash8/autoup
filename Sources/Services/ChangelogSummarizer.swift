@@ -35,10 +35,68 @@ class ChangelogSummarizer: ObservableObject {
     }
 
     private func summarizeWithLocalModel(_ changelog: String, appName: String) async -> String? {
-        // Note: This is a simplified implementation
-        // In practice, you'd need to load and run an MLX model
-        // For now, return a placeholder to show the structure
-        return nil
+        // Enhanced heuristic-based local summarization
+        return await heuristicSummarize(changelog)
+    }
+
+    private func heuristicSummarize(_ text: String) async -> String {
+        let cleanText = text
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\*+", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "#+", with: "", options: .regularExpression)
+
+        let lines = cleanText
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let joined = lines.prefix(6).joined(separator: " ")
+
+        // Security keywords (highest priority)
+        let securityKeywords = [
+            "cve", "security", "vulnerability", "exploit", "patch",
+            "malware", "breach", "unauthorized", "privilege escalation"
+        ]
+
+        // Bug keywords
+        let bugKeywords = [
+            "bug", "fix", "crash", "freeze", "hang", "error",
+            "issue", "problem", "resolve", "correct"
+        ]
+
+        // Performance keywords
+        let performanceKeywords = [
+            "performance", "speed", "faster", "optimization", "memory",
+            "cpu", "battery", "efficiency", "responsive"
+        ]
+
+        let lowerText = joined.lowercased()
+
+        // Priority: Security > Bugs > Performance > Generic
+        if securityKeywords.contains(where: { lowerText.contains($0) }) {
+            return "Security fix and stability improvements."
+        }
+
+        if bugKeywords.contains(where: { lowerText.contains($0) }) {
+            return "Bug fixes and performance improvements."
+        }
+
+        if performanceKeywords.contains(where: { lowerText.contains($0) }) {
+            return "Performance improvements and optimizations."
+        }
+
+        // Extract first meaningful sentence
+        let sentences = joined.components(separatedBy: CharacterSet(charactersIn: ".!?"))
+        for sentence in sentences.prefix(3) {
+            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count > 10 && trimmed.count < 120 {
+                return trimmed + "."
+            }
+        }
+
+        // Fallback: truncate to reasonable length
+        let truncated = String(joined.prefix(140))
+        return truncated.hasSuffix(" ") ? String(truncated.dropLast()) : truncated
     }
 
     private func summarizeWithOpenAI(_ changelog: String, appName: String, apiKey: String) async -> String? {
@@ -130,6 +188,88 @@ class ChangelogSummarizer: ObservableObject {
 
     private func containsAny(_ text: String, keywords: [String]) -> Bool {
         return keywords.contains { text.contains($0) }
+    }
+
+    func extractSecurityInfo(_ text: String) -> SecurityInfo {
+        let lowerText = text.lowercased()
+
+        // Extract CVE numbers
+        let cvePattern = #"cve-\d{4}-\d{4,7}"#
+        let cveRegex = try? NSRegularExpression(pattern: cvePattern, options: .caseInsensitive)
+
+        var cves: [String] = []
+        if let regex = cveRegex {
+            let matches = regex.matches(in: text, options: [], range: NSRange(text.startIndex..., in: text))
+            cves = matches.compactMap { match in
+                guard let range = Range(match.range, in: text) else { return nil }
+                return String(text[range]).uppercased()
+            }
+        }
+
+        // Determine severity
+        let severityKeywords: [String: SecuritySeverity] = [
+            "critical": .critical,
+            "high": .high,
+            "medium": .medium,
+            "moderate": .medium,
+            "low": .low,
+            "important": .high,
+            "severe": .critical
+        ]
+
+        var severity: SecuritySeverity = .unknown
+        for (keyword, level) in severityKeywords {
+            if lowerText.contains(keyword) {
+                if level.rawValue > severity.rawValue {
+                    severity = level
+                }
+            }
+        }
+
+        let hasSecurityContent = [
+            "security", "vulnerability", "exploit", "cve", "patch",
+            "malware", "unauthorized", "privilege"
+        ].contains { lowerText.contains($0) }
+
+        return SecurityInfo(
+            hasSecurity: hasSecurityContent,
+            severity: severity,
+            cves: cves
+        )
+    }
+
+    struct SecurityInfo {
+        let hasSecurity: Bool
+        let severity: SecuritySeverity
+        let cves: [String]
+    }
+
+    enum SecuritySeverity: Int, CaseIterable {
+        case unknown = 0
+        case low = 1
+        case medium = 2
+        case high = 3
+        case critical = 4
+
+        var displayName: String {
+            switch self {
+            case .unknown: return "Unknown"
+            case .low: return "Low"
+            case .medium: return "Medium"
+            case .high: return "High"
+            case .critical: return "Critical"
+            }
+        }
+
+        var color: String {
+            switch self {
+            case .unknown: return "gray"
+            case .low: return "green"
+            case .medium: return "yellow"
+            case .high: return "orange"
+            case .critical: return "red"
+            }
+        }
     }
 }
 
