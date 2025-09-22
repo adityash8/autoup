@@ -8,8 +8,8 @@ class ChangelogSummarizer: ObservableObject {
     private let useLocalModel: Bool
 
     init() {
-        self.openAIAPIKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
-        self.useLocalModel = true // Prefer local model for privacy
+        openAIAPIKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+        useLocalModel = true // Prefer local model for privacy
     }
 
     func summarizeChangelog(_ changelog: String, for appName: String) async -> String? {
@@ -38,18 +38,23 @@ class ChangelogSummarizer: ObservableObject {
         // Note: This is a simplified implementation
         // In practice, you'd need to load and run an MLX model
         // For now, return a placeholder to show the structure
-        return nil
+        nil
     }
 
     private func summarizeWithOpenAI(_ changelog: String, appName: String, apiKey: String) async -> String? {
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            print("Invalid OpenAI API URL")
+            return nil
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let prompt = """
-        Summarize this app update changelog for \(appName) in under 20 words. Focus on security fixes, bugs, and performance improvements. Be concise and user-friendly.
+        Summarize this app update changelog for \(
+            appName
+        ) in under 20 words. Focus on security fixes, bugs, and performance improvements. Be concise and user-friendly.
 
         Changelog:
         \(changelog)
@@ -60,11 +65,11 @@ class ChangelogSummarizer: ObservableObject {
             "messages": [
                 [
                     "role": "user",
-                    "content": prompt
-                ]
+                    "content": prompt,
+                ],
             ],
             "max_tokens": 50,
-            "temperature": 0.3
+            "temperature": 0.3,
         ]
 
         do {
@@ -73,13 +78,15 @@ class ChangelogSummarizer: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
+                  httpResponse.statusCode == 200
+            else {
                 print("OpenAI API error: \(response)")
                 return nil
             }
 
             let openAIResponse = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-            return openAIResponse.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return openAIResponse.choices.first?.message.content
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
         } catch {
             print("Error calling OpenAI API: \(error)")
@@ -93,7 +100,10 @@ class ChangelogSummarizer: ObservableObject {
         var features: [String] = []
 
         // Security keywords
-        if containsAny(lowercaseChangelog, keywords: ["security", "vulnerability", "cve", "exploit", "patch"]) {
+        if containsAny(
+            lowercaseChangelog,
+            keywords: ["security", "vulnerability", "cve", "exploit", "patch"]
+        ) {
             features.append("security fixes")
         }
 
@@ -103,7 +113,10 @@ class ChangelogSummarizer: ObservableObject {
         }
 
         // Performance
-        if containsAny(lowercaseChangelog, keywords: ["performance", "faster", "speed", "optimization", "memory"]) {
+        if containsAny(
+            lowercaseChangelog,
+            keywords: ["performance", "faster", "speed", "optimization", "memory"]
+        ) {
             features.append("performance improvements")
         }
 
@@ -129,7 +142,7 @@ class ChangelogSummarizer: ObservableObject {
     }
 
     private func containsAny(_ text: String, keywords: [String]) -> Bool {
-        return keywords.contains { text.contains($0) }
+        keywords.contains { text.contains($0) }
     }
 }
 

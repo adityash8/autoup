@@ -26,7 +26,7 @@ class UpdateDetector: ObservableObject {
 
             // Check Homebrew
             group.addTask {
-                await self.homebrewDetector.checkForUpdates(apps: apps.filter { $0.isHomebrew })
+                await self.homebrewDetector.checkForUpdates(apps: apps.filter(\.isHomebrew))
             }
 
             // Check GitHub
@@ -62,7 +62,8 @@ class SparkleUpdateDetector {
 
     func checkForUpdate(app: AppInfo) async -> [UpdateInfo]? {
         guard let sparkleURLString = app.sparkleURL,
-              let sparkleURL = URL(string: sparkleURLString) else {
+              let sparkleURL = URL(string: sparkleURLString)
+        else {
             return nil
         }
 
@@ -79,21 +80,30 @@ class SparkleUpdateDetector {
 }
 
 class HomebrewUpdateDetector {
+    private let safeProcess = SafeProcess()
+
     func checkForUpdates(apps: [AppInfo]) async -> [UpdateInfo] {
         guard !apps.isEmpty else { return [] }
 
         do {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
-            process.arguments = ["outdated", "--cask", "--json"]
+            // Check if brew is available
+            guard await safeProcess.isExecutableAvailable("brew") else {
+                print("Homebrew not available")
+                return []
+            }
 
-            let pipe = Pipe()
-            process.standardOutput = pipe
+            let result = try await safeProcess.execute(
+                executable: "brew",
+                arguments: ["outdated", "--cask", "--json"],
+                timeout: 60
+            )
 
-            try process.run()
-            process.waitUntilExit()
+            guard result.isSuccess else {
+                print("Homebrew command failed: \(result.stderr)")
+                return []
+            }
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let data = result.stdout.data(using: .utf8) ?? Data()
             let outdatedCasks = try JSONDecoder().decode(HomebrewOutdatedResponse.self, from: data)
 
             var updates: [UpdateInfo] = []
@@ -127,8 +137,8 @@ class HomebrewUpdateDetector {
         let caskNameLower = cask.name.lowercased()
 
         return appNameLower.contains(caskNameLower) ||
-               caskNameLower.contains(appNameLower) ||
-               app.bundleID.lowercased().contains(caskNameLower)
+            caskNameLower.contains(appNameLower) ||
+            app.bundleID.lowercased().contains(caskNameLower)
     }
 }
 
@@ -138,13 +148,15 @@ class GitHubUpdateDetector {
     func checkForUpdate(app: AppInfo) async -> [UpdateInfo]? {
         guard let repo = app.githubRepo else { return nil }
 
-        let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest") else {
+            return nil
+        }
 
         do {
             let (data, _) = try await urlSession.data(from: url)
             let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
 
-            if isVersionNewer(release.tag_name, than: app.version) {
+            if Versioning.isNewer(release.tag_name, than: app.version) {
                 let isSecurityUpdate = containsSecurityKeywords(release.body ?? "")
 
                 // Find download URL for macOS
@@ -171,13 +183,6 @@ class GitHubUpdateDetector {
         }
     }
 
-    private func isVersionNewer(_ newVersion: String, than currentVersion: String) -> Bool {
-        // Simple version comparison - could be improved with proper semver
-        let cleanNew = newVersion.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-        let cleanCurrent = currentVersion.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-
-        return cleanNew.compare(cleanCurrent, options: .numeric) == .orderedDescending
-    }
 
     private func containsSecurityKeywords(_ text: String) -> Bool {
         let securityKeywords = ["security", "vulnerability", "cve", "exploit", "patch", "fix"]
@@ -190,7 +195,8 @@ class GitHubUpdateDetector {
         // Look for macOS-specific assets
         let macAssets = assets.filter { asset in
             let name = asset.name.lowercased()
-            return name.contains("mac") || name.contains("darwin") || name.contains(".dmg") || name.contains(".pkg")
+            return name.contains("mac") || name.contains("darwin") || name.contains(".dmg") || name
+                .contains(".pkg")
         }
 
         return macAssets.first?.browser_download_url
@@ -211,7 +217,7 @@ class SparkleXMLParser {
         for line in lines {
             if line.contains("sparkle:version=") {
                 version = extractAttribute(from: line, attribute: "sparkle:version")
-            } else if line.contains("url=") && url == nil {
+            } else if line.contains("url="), url == nil {
                 url = extractAttribute(from: line, attribute: "url")
             } else if line.contains("<description>") {
                 description = extractContent(from: line, tag: "description")
@@ -220,7 +226,8 @@ class SparkleXMLParser {
 
         guard let latestVersion = version,
               let downloadURL = url,
-              isVersionNewer(latestVersion, than: app.version) else {
+              Versioning.isNewer(latestVersion, than: app.version)
+        else {
             return nil
         }
 
@@ -242,18 +249,15 @@ class SparkleXMLParser {
         guard let range = line.range(of: "\(attribute)=\"") else { return nil }
         let start = range.upperBound
         guard let endRange = line[start...].range(of: "\"") else { return nil }
-        return String(line[start..<endRange.lowerBound])
+        return String(line[start ..< endRange.lowerBound])
     }
 
     private func extractContent(from line: String, tag: String) -> String? {
         guard let startRange = line.range(of: "<\(tag)>"),
               let endRange = line.range(of: "</\(tag)>") else { return nil }
-        return String(line[startRange.upperBound..<endRange.lowerBound])
+        return String(line[startRange.upperBound ..< endRange.lowerBound])
     }
 
-    private func isVersionNewer(_ newVersion: String, than currentVersion: String) -> Bool {
-        return newVersion.compare(currentVersion, options: .numeric) == .orderedDescending
-    }
 
     private func containsSecurityKeywords(_ text: String) -> Bool {
         let securityKeywords = ["security", "vulnerability", "cve", "exploit", "patch", "fix"]

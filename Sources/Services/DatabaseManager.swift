@@ -50,7 +50,8 @@ class DatabaseManager: ObservableObject {
 
     init() {
         // Create database in Application Support directory
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
         let autoUpDir = appSupport.appendingPathComponent("AutoUp")
 
         do {
@@ -130,12 +131,13 @@ class DatabaseManager: ObservableObject {
     // MARK: - App Management
 
     func saveApps(_ apps: [AppInfo]) {
-        guard let db = db else { return }
+        guard let db else { return }
 
         do {
             try db.transaction {
                 for app in apps {
-                    try db.run(appsTable.insert(or: .replace,
+                    try db.run(appsTable.insert(
+                        or: .replace,
                         bundleID <- app.bundleID,
                         appName <- app.name,
                         version <- app.version,
@@ -155,7 +157,7 @@ class DatabaseManager: ObservableObject {
     }
 
     func loadApps() -> [AppInfo] {
-        guard let db = db else { return [] }
+        guard let db else { return [] }
 
         do {
             let apps = try db.prepare(appsTable).map { row in
@@ -181,7 +183,7 @@ class DatabaseManager: ObservableObject {
     // MARK: - Update Management
 
     func saveUpdates(_ updates: [UpdateInfo]) {
-        guard let db = db else { return }
+        guard let db else { return }
 
         do {
             // Clear existing updates
@@ -208,7 +210,7 @@ class DatabaseManager: ObservableObject {
     }
 
     func loadUpdates() -> [UpdateInfo] {
-        guard let db = db else { return [] }
+        guard let db else { return [] }
 
         do {
             let apps = loadApps()
@@ -238,7 +240,7 @@ class DatabaseManager: ObservableObject {
     // MARK: - Update History
 
     func saveUpdateHistory(_ historyItem: UpdateHistory) {
-        guard let db = db else { return }
+        guard let db else { return }
 
         do {
             try db.run(historyTable.insert(
@@ -255,7 +257,7 @@ class DatabaseManager: ObservableObject {
     }
 
     func loadUpdateHistory(limit: Int = 50) -> [UpdateHistory] {
-        guard let db = db else { return [] }
+        guard let db else { return [] }
 
         do {
             let apps = loadApps()
@@ -287,10 +289,11 @@ class DatabaseManager: ObservableObject {
     // MARK: - Settings
 
     func saveSetting(key: String, value: String) {
-        guard let db = db else { return }
+        guard let db else { return }
 
         do {
-            try db.run(settingsTable.insert(or: .replace,
+            try db.run(settingsTable.insert(
+                or: .replace,
                 settingKey <- key,
                 settingValue <- value
             ))
@@ -300,7 +303,7 @@ class DatabaseManager: ObservableObject {
     }
 
     func loadSetting(key: String) -> String? {
-        guard let db = db else { return nil }
+        guard let db else { return nil }
 
         do {
             let query = settingsTable.filter(settingKey == key)
@@ -316,7 +319,7 @@ class DatabaseManager: ObservableObject {
     // MARK: - Utility Methods
 
     func clearAllData() {
-        guard let db = db else { return }
+        guard let db else { return }
 
         do {
             try db.run(appsTable.delete())
@@ -338,9 +341,9 @@ class DatabaseManager: ObservableObject {
     }
 
     func exportToCSV() -> URL? {
-        guard let db = db else { return nil }
+        guard let db else { return nil }
 
-        let documentsURL = FileManager.default.urls(for: .documentsDirectory, in: .userDomainMask).first!
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let csvURL = documentsURL.appendingPathComponent("autoup_export_\(Date().timeIntervalSince1970).csv")
 
         do {
@@ -352,7 +355,8 @@ class DatabaseManager: ObservableObject {
 
             for app in apps {
                 let hasUpdates = updatesByBundleID[app.bundleID]?.isEmpty == false
-                csvContent += "\"\(app.name)\",\"\(app.bundleID)\",\"\(app.version)\",\"\(app.lastModified)\",\"\(hasUpdates)\"\n"
+                csvContent +=
+                    "\"\(app.name)\",\"\(app.bundleID)\",\"\(app.version)\",\"\(app.lastModified)\",\"\(hasUpdates)\"\n"
             }
 
             try csvContent.write(to: csvURL, atomically: true, encoding: .utf8)

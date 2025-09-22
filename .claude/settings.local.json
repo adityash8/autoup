@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(swift build)",
+      "Bash(./.build/debug/AutoUp:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)",
+      "Read(//Users/adityasheth/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
