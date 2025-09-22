@@ -23,7 +23,7 @@ struct AppInfo: Identifiable, Codable, Hashable {
 }
 
 enum HealthScore: String, CaseIterable, Codable {
-    case current = "current"
+    case current
     case updateAvailable = "update_available"
     case securityUpdate = "security_update"
     case tahoeIncompatible = "tahoe_incompatible"
@@ -31,26 +31,26 @@ enum HealthScore: String, CaseIterable, Codable {
     var color: String {
         switch self {
         case .current:
-            return "green"
+            "green"
         case .updateAvailable:
-            return "yellow"
+            "yellow"
         case .securityUpdate:
-            return "red"
+            "red"
         case .tahoeIncompatible:
-            return "purple"
+            "purple"
         }
     }
 
     var description: String {
         switch self {
         case .current:
-            return "Up to date"
+            "Up to date"
         case .updateAvailable:
-            return "Update available"
+            "Update available"
         case .securityUpdate:
-            return "Security update"
+            "Security update"
         case .tahoeIncompatible:
-            return "Tahoe incompatible"
+            "Tahoe incompatible"
         }
     }
 }
@@ -67,7 +67,8 @@ struct UpdateInfo: Identifiable, Codable {
     let detectedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case appInfo, availableVersion, changelog, downloadURL, isSecurityUpdate, isTahoeCompatible, summary, detectedAt
+        case appInfo, availableVersion, changelog, downloadURL, isSecurityUpdate, isTahoeCompatible, summary,
+             detectedAt
     }
 }
 

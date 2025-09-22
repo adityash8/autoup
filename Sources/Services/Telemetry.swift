@@ -4,7 +4,9 @@ import PostHog
 enum Telemetry {
     static func configure(enabled: Bool, apiKey: String) {
         if enabled {
-            PostHogSDK.shared.setup(apiKey: apiKey, host: URL(string:"https://app.posthog.com")!)
+            let config = PostHogConfig(apiKey: apiKey)
+            config.host = "https://app.posthog.com"
+            PostHogSDK.shared.setup(config)
             PostHogSDK.shared.optIn()
         } else {
             PostHogSDK.shared.optOut()
@@ -13,16 +15,16 @@ enum Telemetry {
 
     static func track(_ name: String, props: [String: Any] = [:]) {
         guard UserDefaults.standard.bool(forKey: "telemetry_enabled") else { return }
-        PostHogSDK.shared.capture(event: name, properties: props)
+        PostHogSDK.shared.capture(name, properties: props)
     }
 
     // Bias-driven events for measuring UX improvements
     static func trackBiasEvent(_ biasType: String, action: String, value: Any? = nil) {
         var props: [String: Any] = [
             "bias_type": biasType,
-            "action": action
+            "action": action,
         ]
-        if let value = value {
+        if let value {
             props["value"] = value
         }
         track("bias_interaction", props: props)

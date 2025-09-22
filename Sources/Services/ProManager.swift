@@ -9,7 +9,7 @@ class ProManager: ObservableObject {
     private let productIDs = [
         "com.autoup.pro.monthly",
         "com.autoup.pro.yearly",
-        "com.autoup.pro.family"
+        "com.autoup.pro.family",
     ]
 
     private var updateListenerTask: Task<Void, Error>?
@@ -76,7 +76,7 @@ class ProManager: ObservableObject {
     }
 
     private func listenForTransactions() -> Task<Void, Error> {
-        return Task.detached {
+        Task.detached {
             for await result in Transaction.updates {
                 do {
                     let transaction = try self.checkVerified(result)
@@ -107,23 +107,23 @@ enum StoreError: Error {
 
 extension ProManager {
     var hasMultiMacSync: Bool {
-        return isProUser
+        isProUser
     }
 
     var hasVersionPinning: Bool {
-        return isProUser
+        isProUser
     }
 
     var hasRollbackFeature: Bool {
-        return isProUser
+        isProUser
     }
 
     var hasFamilySharing: Bool {
-        return purchasedProductIDs.contains("com.autoup.pro.family")
+        purchasedProductIDs.contains("com.autoup.pro.family")
     }
 
     var hasPrioritySupport: Bool {
-        return isProUser
+        isProUser
     }
 }
 
@@ -180,26 +180,30 @@ class VersionPinningService: ObservableObject {
 
     private func loadPinnedVersions() {
         if let data = databaseManager.loadSetting(key: "pinnedVersions"),
-           let decoded = try? JSONDecoder().decode([String: String].self, from: data.data(using: .utf8)!) {
+           let decoded = try? JSONDecoder().decode([String: String].self, from: data.data(using: .utf8)!)
+        {
             pinnedVersions = decoded
         }
 
         if let data = databaseManager.loadSetting(key: "ignoredApps"),
-           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data.data(using: .utf8)!) {
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data.data(using: .utf8)!)
+        {
             ignoredApps = decoded
         }
     }
 
     private func savePinnedVersions() {
         if let encoded = try? JSONEncoder().encode(pinnedVersions),
-           let jsonString = String(data: encoded, encoding: .utf8) {
+           let jsonString = String(data: encoded, encoding: .utf8)
+        {
             databaseManager.saveSetting(key: "pinnedVersions", value: jsonString)
         }
     }
 
     private func saveIgnoredApps() {
         if let encoded = try? JSONEncoder().encode(ignoredApps),
-           let jsonString = String(data: encoded, encoding: .utf8) {
+           let jsonString = String(data: encoded, encoding: .utf8)
+        {
             databaseManager.saveSetting(key: "ignoredApps", value: jsonString)
         }
     }
@@ -325,25 +329,25 @@ struct OverallHealthScore {
 
     var description: String {
         if securityUpdates > 0 {
-            return "\(securityUpdates) security update\(securityUpdates == 1 ? "" : "s") needed"
+            "\(securityUpdates) security update\(securityUpdates == 1 ? "" : "s") needed"
         } else if updatesAvailable > 0 {
-            return "\(updatesAvailable) update\(updatesAvailable == 1 ? "" : "s") available"
+            "\(updatesAvailable) update\(updatesAvailable == 1 ? "" : "s") available"
         } else if tahoeIncompatible > 0 {
-            return "\(tahoeIncompatible) app\(tahoeIncompatible == 1 ? "" : "s") incompatible with Tahoe"
+            "\(tahoeIncompatible) app\(tahoeIncompatible == 1 ? "" : "s") incompatible with Tahoe"
         } else {
-            return "All apps up to date"
+            "All apps up to date"
         }
     }
 
     var color: String {
         if securityUpdates > 0 {
-            return "red"
+            "red"
         } else if updatesAvailable > 0 {
-            return "yellow"
+            "yellow"
         } else if tahoeIncompatible > 0 {
-            return "purple"
+            "purple"
         } else {
-            return "green"
+            "green"
         }
     }
 }

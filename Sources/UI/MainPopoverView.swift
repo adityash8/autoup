@@ -7,7 +7,7 @@ struct MainPopoverView: View {
     @State private var showingSettings = false
     @State private var isUpdating = false
     @State private var scanProgress: Double = 0.0
-    @State private var lastScanDate: Date = Date()
+    @State private var lastScanDate: Date = .init()
     @State private var streakDays: Int = 7
 
     var body: some View {
@@ -270,7 +270,10 @@ struct UpdateRowView: View {
 
                     Spacer()
 
-                    HealthIndicatorView(healthScore: update.isSecurityUpdate ? .securityUpdate : .updateAvailable)
+                    HealthIndicatorView(
+                        healthScore: update
+                            .isSecurityUpdate ? .securityUpdate : .updateAvailable
+                    )
                 }
 
                 HStack {
@@ -331,13 +334,13 @@ struct HealthIndicatorView: View {
     private var colorForHealthScore: Color {
         switch healthScore {
         case .current:
-            return .green
+            .green
         case .updateAvailable:
-            return .yellow
+            .yellow
         case .securityUpdate:
-            return .red
+            .red
         case .tahoeIncompatible:
-            return .purple
+            .purple
         }
     }
 }

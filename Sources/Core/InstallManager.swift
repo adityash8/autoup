@@ -1,5 +1,5 @@
-import Foundation
 import AppKit
+import Foundation
 
 class InstallManager: ObservableObject {
     @Published var currentInstallations: [String: InstallProgress] = [:]
@@ -7,6 +7,8 @@ class InstallManager: ObservableObject {
     private let fileManager = FileManager.default
     private let downloadManager = DownloadManager()
     private let rollbackManager = RollbackManager()
+    private let safeProcess = SafeProcess()
+    private let atomicFileManager = AtomicFileManager()
 
     func installUpdate(_ update: UpdateInfo) async throws {
         let appID = update.appInfo.bundleID
@@ -71,27 +73,39 @@ class InstallManager: ObservableObject {
     }
 
     private func downloadHomebrewUpdate(_ update: UpdateInfo) async throws -> URL {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
-        process.arguments = ["upgrade", "--cask", update.appInfo.name.lowercased()]
-
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-
-                    if process.terminationStatus == 0 {
-                        // Homebrew handles the installation directly
-                        continuation.resume(returning: URL(fileURLWithPath: "/tmp/homebrew_success"))
-                    } else {
-                        continuation.resume(throwing: InstallError.homebrewFailed)
-                    }
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
+        // Validate that brew is available
+        guard await safeProcess.isExecutableAvailable("brew") else {
+            throw InstallError.homebrewNotAvailable
         }
+
+        // Sanitize cask name to prevent injection
+        let caskName = sanitizeCaskName(update.appInfo.name)
+
+        do {
+            let result = try await safeProcess.execute(
+                executable: "brew",
+                arguments: ["upgrade", "--cask", caskName],
+                timeout: 300 // 5 minutes for Homebrew operations
+            )
+
+            if result.isSuccess {
+                // Homebrew handles the installation directly
+                return URL(fileURLWithPath: "/tmp/homebrew_success")
+            } else {
+                throw InstallError.homebrewFailed
+            }
+        } catch {
+            throw InstallError.homebrewFailed
+        }
+    }
+
+    private func sanitizeCaskName(_ name: String) -> String {
+        // Remove dangerous characters and convert to safe format
+        let allowedChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        return name.lowercased()
+            .components(separatedBy: allowedChars.inverted)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func performInstallation(downloadedFile: URL, update: UpdateInfo) async throws {
@@ -119,7 +133,9 @@ class InstallManager: ObservableObject {
         let mountPoint = try await mountDMG(dmgFile)
         defer {
             // Unmount DMG
-            try? unmountDMG(mountPoint)
+            Task {
+                try? await unmountDMG(mountPoint)
+            }
         }
 
         // Find the .app bundle in the mounted DMG
@@ -131,36 +147,40 @@ class InstallManager: ObservableObject {
         let sourceApp = mountPoint.appendingPathComponent(appFile)
         let destinationApp = URL(fileURLWithPath: update.appInfo.path)
 
-        // Remove old app
-        if fileManager.fileExists(atPath: destinationApp.path) {
-            try fileManager.removeItem(at: destinationApp)
-        }
+        // Use atomic replacement to ensure safe installation
+        let backupURL = try await atomicFileManager.atomicReplace(
+            sourceURL: sourceApp,
+            destinationURL: destinationApp,
+            createBackup: true
+        )
 
-        // Copy new app
-        try fileManager.copyItem(at: sourceApp, to: destinationApp)
+        // Store backup information for potential rollback
+        if let backupURL = backupURL {
+            try await rollbackManager.registerBackup(
+                appInfo: update.appInfo,
+                backupURL: backupURL
+            )
+        }
     }
 
     private func installFromPKG(_ pkgFile: URL, update: UpdateInfo) async throws {
-        // Use Installer.app or installer command
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/installer")
-        process.arguments = ["-pkg", pkgFile.path, "-target", "/"]
+        // Validate PKG file exists and is readable
+        guard fileManager.fileExists(atPath: pkgFile.path) else {
+            throw InstallError.pkgFileNotFound
+        }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                do {
-                    try process.run()
-                    process.waitUntilExit()
+        do {
+            let result = try await safeProcess.execute(
+                executable: "installer",
+                arguments: ["-pkg", pkgFile.path, "-target", "/"],
+                timeout: 600 // 10 minutes for package installation
+            )
 
-                    if process.terminationStatus == 0 {
-                        continuation.resume()
-                    } else {
-                        continuation.resume(throwing: InstallError.pkgInstallationFailed)
-                    }
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+            if !result.isSuccess {
+                throw InstallError.pkgInstallationFailed
             }
+        } catch {
+            throw InstallError.pkgInstallationFailed
         }
     }
 
@@ -173,15 +193,18 @@ class InstallManager: ObservableObject {
             try? fileManager.removeItem(at: tempDir)
         }
 
-        // Unzip using system unzip command
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-q", zipFile.path, "-d", tempDir.path]
+        // Unzip using safe process execution
+        do {
+            let result = try await safeProcess.execute(
+                executable: "unzip",
+                arguments: ["-q", zipFile.path, "-d", tempDir.path],
+                timeout: 120 // 2 minutes for extraction
+            )
 
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
+            if !result.isSuccess {
+                throw InstallError.zipExtractionFailed
+            }
+        } catch {
             throw InstallError.zipExtractionFailed
         }
 
@@ -194,13 +217,20 @@ class InstallManager: ObservableObject {
         let sourceApp = tempDir.appendingPathComponent(appFile)
         let destinationApp = URL(fileURLWithPath: update.appInfo.path)
 
-        // Remove old app
-        if fileManager.fileExists(atPath: destinationApp.path) {
-            try fileManager.removeItem(at: destinationApp)
-        }
+        // Use atomic replacement to ensure safe installation
+        let backupURL = try await atomicFileManager.atomicReplace(
+            sourceURL: sourceApp,
+            destinationURL: destinationApp,
+            createBackup: true
+        )
 
-        // Copy new app
-        try fileManager.copyItem(at: sourceApp, to: destinationApp)
+        // Store backup information for potential rollback
+        if let backupURL = backupURL {
+            try await rollbackManager.registerBackup(
+                appInfo: update.appInfo,
+                backupURL: backupURL
+            )
+        }
     }
 
     private func findAppBundle(in contents: [String], at directory: URL) -> String? {
@@ -212,9 +242,12 @@ class InstallManager: ObservableObject {
             // Check subdirectories
             let itemPath = directory.appendingPathComponent(item)
             var isDirectory: ObjCBool = false
-            if fileManager.fileExists(atPath: itemPath.path, isDirectory: &isDirectory) && isDirectory.boolValue {
+            if fileManager.fileExists(atPath: itemPath.path, isDirectory: &isDirectory),
+               isDirectory.boolValue
+            {
                 if let subContents = try? fileManager.contentsOfDirectory(atPath: itemPath.path),
-                   let appBundle = findAppBundle(in: subContents, at: itemPath) {
+                   let appBundle = findAppBundle(in: subContents, at: itemPath)
+                {
                     return "\(item)/\(appBundle)"
                 }
             }
@@ -223,51 +256,46 @@ class InstallManager: ObservableObject {
     }
 
     private func mountDMG(_ dmgFile: URL) async throws -> URL {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        process.arguments = ["attach", "-nobrowse", "-quiet", dmgFile.path]
+        // Validate DMG file exists
+        guard fileManager.fileExists(atPath: dmgFile.path) else {
+            throw InstallError.dmgFileNotFound
+        }
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        do {
+            let result = try await safeProcess.execute(
+                executable: "hdiutil",
+                arguments: ["attach", "-nobrowse", "-quiet", dmgFile.path],
+                timeout: 120 // 2 minutes for mounting
+            )
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-
-                    if process.terminationStatus == 0 {
-                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        let output = String(data: data, encoding: .utf8) ?? ""
-
-                        // Parse mount point from hdiutil output
-                        let lines = output.components(separatedBy: .newlines)
-                        for line in lines {
-                            let components = line.components(separatedBy: .whitespaces)
-                            if let mountPoint = components.last, mountPoint.hasPrefix("/Volumes/") {
-                                continuation.resume(returning: URL(fileURLWithPath: mountPoint))
-                                return
-                            }
-                        }
-
-                        continuation.resume(throwing: InstallError.dmgMountFailed)
-                    } else {
-                        continuation.resume(throwing: InstallError.dmgMountFailed)
+            if result.isSuccess {
+                // Parse mount point from hdiutil output
+                let lines = result.stdout.components(separatedBy: .newlines)
+                for line in lines {
+                    let components = line.components(separatedBy: .whitespaces)
+                    if let mountPoint = components.last, mountPoint.hasPrefix("/Volumes/") {
+                        return URL(fileURLWithPath: mountPoint)
                     }
-                } catch {
-                    continuation.resume(throwing: error)
                 }
             }
+
+            throw InstallError.dmgMountFailed
+        } catch {
+            throw InstallError.dmgMountFailed
         }
     }
 
-    private func unmountDMG(_ mountPoint: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        process.arguments = ["detach", mountPoint.path, "-quiet"]
-
-        try process.run()
-        process.waitUntilExit()
+    private func unmountDMG(_ mountPoint: URL) async throws {
+        do {
+            _ = try await safeProcess.execute(
+                executable: "hdiutil",
+                arguments: ["detach", mountPoint.path, "-quiet"],
+                timeout: 30
+            )
+        } catch {
+            // Log but don't fail on unmount errors
+            print("Warning: Failed to unmount DMG at \(mountPoint.path): \(error)")
+        }
     }
 }
 
@@ -278,7 +306,9 @@ class DownloadManager {
         let (tempURL, _) = try await urlSession.download(from: url)
 
         // Move to a more permanent location
-        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        guard let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+            throw DownloadError.downloadsDirectoryNotFound
+        }
         let fileName = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
         let destinationURL = downloadsDir.appendingPathComponent("AutoUp_\(fileName)")
 
@@ -292,7 +322,9 @@ class RollbackManager {
     private let cacheDirectory: URL
 
     init() {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            fatalError("Unable to access Application Support directory")
+        }
         cacheDirectory = appSupport.appendingPathComponent("AutoUp/Cache")
 
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
@@ -303,27 +335,22 @@ class RollbackManager {
         let rollbackName = "\(app.bundleID)_\(app.version).zip"
         let rollbackURL = cacheDirectory.appendingPathComponent(rollbackName)
 
-        // Create ZIP of current app
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-q", rollbackURL.path, appURL.lastPathComponent]
-        process.currentDirectoryURL = appURL.deletingLastPathComponent()
+        // Create ZIP of current app using safe process execution
+        let safeProcess = SafeProcess()
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                do {
-                    try process.run()
-                    process.waitUntilExit()
+        do {
+            let result = try await safeProcess.execute(
+                executable: "zip",
+                arguments: ["-r", "-q", rollbackURL.path, appURL.lastPathComponent],
+                timeout: 300, // 5 minutes for backup creation
+                workingDirectory: appURL.deletingLastPathComponent()
+            )
 
-                    if process.terminationStatus == 0 {
-                        continuation.resume()
-                    } else {
-                        continuation.resume(throwing: InstallError.rollbackCreationFailed)
-                    }
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+            if !result.isSuccess {
+                throw InstallError.rollbackCreationFailed
             }
+        } catch {
+            throw InstallError.rollbackCreationFailed
         }
     }
 
@@ -341,27 +368,63 @@ class RollbackManager {
             try fileManager.removeItem(at: appURL)
         }
 
-        // Extract rollback version
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-q", rollbackURL.path, "-d", appURL.deletingLastPathComponent().path]
+        // Extract rollback version using safe process execution
+        let safeProcess = SafeProcess()
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
+        do {
+            let result = try await safeProcess.execute(
+                executable: "unzip",
+                arguments: ["-q", rollbackURL.path, "-d", appURL.deletingLastPathComponent().path],
+                timeout: 120 // 2 minutes for extraction
+            )
+
+            if !result.isSuccess {
+                throw InstallError.rollbackFailed
+            }
+        } catch {
+            throw InstallError.rollbackFailed
+        }
+    }
+
+    func registerBackup(appInfo: AppInfo, backupURL: URL) async throws {
+        // Store backup metadata for future rollback operations
+        let metadataURL = cacheDirectory.appendingPathComponent("\(appInfo.bundleID)_backup_metadata.json")
+
+        let metadata = BackupMetadata(
+            appInfo: appInfo,
+            backupURL: backupURL,
+            createdAt: Date()
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(metadata)
+        try data.write(to: metadataURL)
+    }
+
+    func getAvailableBackups(for bundleID: String) -> [BackupMetadata] {
+        // Return available backups for the given app
+        guard let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: nil) else {
+            return []
+        }
+
+        var backups: [BackupMetadata] = []
+
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathExtension == "json" && fileURL.lastPathComponent.contains(bundleID) {
                 do {
-                    try process.run()
-                    process.waitUntilExit()
-
-                    if process.terminationStatus == 0 {
-                        continuation.resume()
-                    } else {
-                        continuation.resume(throwing: InstallError.rollbackFailed)
-                    }
+                    let data = try Data(contentsOf: fileURL)
+                    let decoder = JSONDecoder()
+                    decoder.dateDecodingStrategy = .iso8601
+                    let metadata = try decoder.decode(BackupMetadata.self, from: data)
+                    backups.append(metadata)
                 } catch {
-                    continuation.resume(throwing: error)
+                    print("Failed to decode backup metadata: \(error)")
                 }
             }
         }
+
+        return backups.sorted { $0.createdAt > $1.createdAt }
     }
 }
 
@@ -382,12 +445,15 @@ enum InstallStatus {
 enum InstallError: Error, LocalizedError {
     case invalidDownloadURL
     case homebrewFailed
+    case homebrewNotAvailable
     case unsupportedFileType(String)
     case appNotFoundInDMG
     case appNotFoundInZIP
     case pkgInstallationFailed
+    case pkgFileNotFound
     case zipExtractionFailed
     case dmgMountFailed
+    case dmgFileNotFound
     case rollbackCreationFailed
     case rollbackNotAvailable
     case rollbackFailed
@@ -395,27 +461,50 @@ enum InstallError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidDownloadURL:
-            return "Invalid download URL"
+            "Invalid download URL"
         case .homebrewFailed:
-            return "Homebrew update failed"
+            "Homebrew update failed"
+        case .homebrewNotAvailable:
+            "Homebrew is not available on this system"
         case .unsupportedFileType(let type):
-            return "Unsupported file type: \(type)"
+            "Unsupported file type: \(type)"
         case .appNotFoundInDMG:
-            return "App not found in DMG file"
+            "App not found in DMG file"
         case .appNotFoundInZIP:
-            return "App not found in ZIP file"
+            "App not found in ZIP file"
         case .pkgInstallationFailed:
-            return "Package installation failed"
+            "Package installation failed"
+        case .pkgFileNotFound:
+            "Package file not found"
         case .zipExtractionFailed:
-            return "ZIP extraction failed"
+            "ZIP extraction failed"
         case .dmgMountFailed:
-            return "DMG mounting failed"
+            "DMG mounting failed"
+        case .dmgFileNotFound:
+            "DMG file not found"
         case .rollbackCreationFailed:
-            return "Failed to create rollback point"
+            "Failed to create rollback point"
         case .rollbackNotAvailable:
-            return "Rollback version not available"
+            "Rollback version not available"
         case .rollbackFailed:
-            return "Rollback failed"
+            "Rollback failed"
         }
     }
+}
+
+enum DownloadError: Error, LocalizedError {
+    case downloadsDirectoryNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .downloadsDirectoryNotFound:
+            "Downloads directory not found"
+        }
+    }
+}
+
+struct BackupMetadata: Codable {
+    let appInfo: AppInfo
+    let backupURL: URL
+    let createdAt: Date
 }
