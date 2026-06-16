@@ -10,6 +10,10 @@ jobs:
           curl https://cursor.com/install -fsS | bash
           echo "$HOME/.cursor/bin" >> $GITHUB_PATH
       - run: |
+          if [ -z "$CURSOR_API_KEY" ]; then
+            echo "CURSOR_API_KEY is not set — skipping Cursor review (no-op)."
+            exit 0
+          fi
           cursor-agent -p "You are an automated code reviewer. Focus on security issues, logic bugs, missing tests, and code style. Provide detailed feedback on the PR changes." --model gpt-4
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
