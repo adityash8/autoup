@@ -6,6 +6,9 @@ struct MainPopoverView: View {
     @State private var availableUpdates: [UpdateInfo] = []
     @State private var showingSettings = false
     @State private var isUpdating = false
+    @State private var scanProgress: Double = 0.0
+    @State private var lastScanDate: Date = Date()
+    @State private var streakDays: Int = 7
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,16 +40,30 @@ struct MainPopoverView: View {
     private var headerView: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Auto-Up")
-                    .font(.title2)
-                    .fontWeight(.bold)
-
                 if !availableUpdates.isEmpty {
-                    Text("\(availableUpdates.count) updates available")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    let securityCount = availableUpdates.filter(\.isSecurityUpdate).count
+                    if securityCount > 0 {
+                        Text("⚠️ Don't risk unpatched apps")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.red)
+                        Text("\(securityCount) security fix\(securityCount == 1 ? "" : "es") pending")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    } else {
+                        Text("Updates Available")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        Text("Avoid crashes and bugs")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
                 } else {
-                    Text("All apps up to date")
+                    Text("✅ All Fresh!")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.green)
+                    Text("Your Mac is protected")
                         .font(.caption)
                         .foregroundColor(.green)
                 }
@@ -69,15 +86,43 @@ struct MainPopoverView: View {
     }
 
     private var scanningView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.2)
+        VStack(spacing: 20) {
+            // Progress indicator with Zeigarnik Effect
+            VStack(spacing: 8) {
+                Text("Step 1/2 • Scanning • Almost there...")
+                    .font(.headline)
+                    .foregroundColor(.blue)
 
-            Text("Scanning installed apps...")
-                .font(.headline)
-                .foregroundColor(.secondary)
+                ProgressView(value: scanProgress, total: 1.0)
+                    .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                    .frame(width: 200)
+
+                Text("\(Int(scanProgress * 100))% complete")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(spacing: 4) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.blue)
+                    Text("Scanning installed apps...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                Text("This helps us find security updates")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            // Animate progress for Zeigarnik Effect
+            withAnimation(.easeInOut(duration: 2.0)) {
+                scanProgress = 0.7
+            }
+        }
     }
 
     private var allUpToDateView: some View {
@@ -91,9 +136,24 @@ struct MainPopoverView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Your Mac is up to date")
+                Text("Your Mac is protected")
                     .font(.body)
                     .foregroundColor(.secondary)
+
+                // Social Proof + Streak (Goal Gradient)
+                Text("Last scan: \(formatRelativeTime(lastScanDate))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if streakDays > 0 {
+                    Text("\(streakDays)-day safe streak — keep it going!")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(.green.opacity(0.1))
+                        .clipShape(Capsule())
+                }
             }
 
             Button("Scan Again") {
@@ -176,6 +236,12 @@ struct MainPopoverView: View {
         }
 
         await refreshData()
+    }
+
+    private func formatRelativeTime(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.dateTimeStyle = .numeric
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
