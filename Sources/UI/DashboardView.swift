@@ -152,11 +152,11 @@ struct HealthScoreCardView: View {
 
     private var colorForScore: Color {
         switch healthScore.color {
-        case "green": return .green
-        case "yellow": return .yellow
-        case "red": return .red
-        case "purple": return .purple
-        default: return .gray
+        case "green": .green
+        case "yellow": .yellow
+        case "red": .red
+        case "purple": .purple
+        default: .gray
         }
     }
 }

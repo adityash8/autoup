@@ -219,10 +219,26 @@ struct ProUpgradeView: View {
                 .font(.subheadline)
 
             VStack(alignment: .leading, spacing: 12) {
-                ProFeatureRow(icon: "shield.checkered", title: "Avoid failed updates", description: "1-click rollback when updates break")
-                ProFeatureRow(icon: "icloud", title: "Keep all Macs consistent", description: "iCloud sync prevents version drift")
-                ProFeatureRow(icon: "exclamationmark.triangle", title: "Patch security fixes first", description: "Priority queue for critical updates")
-                ProFeatureRow(icon: "person.3", title: "Family protection", description: "Cover up to 5 Macs under one plan")
+                ProFeatureRow(
+                    icon: "shield.checkered",
+                    title: "Avoid failed updates",
+                    description: "1-click rollback when updates break"
+                )
+                ProFeatureRow(
+                    icon: "icloud",
+                    title: "Keep all Macs consistent",
+                    description: "iCloud sync prevents version drift"
+                )
+                ProFeatureRow(
+                    icon: "exclamationmark.triangle",
+                    title: "Patch security fixes first",
+                    description: "Priority queue for critical updates"
+                )
+                ProFeatureRow(
+                    icon: "person.3",
+                    title: "Family protection",
+                    description: "Cover up to 5 Macs under one plan"
+                )
             }
             .padding()
             .background(.ultraThinMaterial)

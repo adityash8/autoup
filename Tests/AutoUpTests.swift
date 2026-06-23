@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoUp
+import XCTest
 
 final class AutoUpTests: XCTestCase {
     var appScanner: AppScanner!
@@ -142,8 +142,28 @@ final class AutoUpTests: XCTestCase {
         let calculator = HealthScoreCalculator()
 
         let apps = [
-            AppInfo(bundleID: "com.test.1", name: "App 1", version: "1.0", path: "/Applications/App1.app", iconPath: nil, sparkleURL: nil, githubRepo: nil, isHomebrew: false, lastModified: Date()),
-            AppInfo(bundleID: "com.test.2", name: "App 2", version: "2.0", path: "/Applications/App2.app", iconPath: nil, sparkleURL: nil, githubRepo: nil, isHomebrew: false, lastModified: Date())
+            AppInfo(
+                bundleID: "com.test.1",
+                name: "App 1",
+                version: "1.0",
+                path: "/Applications/App1.app",
+                iconPath: nil,
+                sparkleURL: nil,
+                githubRepo: nil,
+                isHomebrew: false,
+                lastModified: Date()
+            ),
+            AppInfo(
+                bundleID: "com.test.2",
+                name: "App 2",
+                version: "2.0",
+                path: "/Applications/App2.app",
+                iconPath: nil,
+                sparkleURL: nil,
+                githubRepo: nil,
+                isHomebrew: false,
+                lastModified: Date()
+            ),
         ]
 
         let overallScore = calculator.calculateOverallHealthScore(apps: apps, updates: [])

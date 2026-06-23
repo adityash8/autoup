@@ -1,7 +1,21 @@
 import Foundation
-import BackgroundTasks
 import Network
+
+#if canImport(BackgroundTasks)
+import BackgroundTasks
+#endif
+
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
+
+#if canImport(IOKit)
 import IOKit
+#endif
+
+#if canImport(IOKit.ps)
+import IOKit.ps
+#endif
 
 class BackgroundScheduler: ObservableObject {
     @Published var isScheduled = false
@@ -16,8 +30,18 @@ class BackgroundScheduler: ObservableObject {
     private var updateDetector: UpdateDetector?
     private var installManager: InstallManager?
 
+    private var supportsBGTasks: Bool {
+        #if canImport(BackgroundTasks) && !os(macOS)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     init() {
-        registerBackgroundTask()
+        if supportsBGTasks {
+            registerBackgroundTask()
+        }
         startNetworkMonitoring()
     }
 
@@ -25,26 +49,36 @@ class BackgroundScheduler: ObservableObject {
         pathMonitor.cancel()
     }
 
-    func setupServices(appScanner: AppScanner, updateDetector: UpdateDetector, installManager: InstallManager) {
+    func setupServices(
+        appScanner: AppScanner,
+        updateDetector: UpdateDetector,
+        installManager: InstallManager
+    ) {
         self.appScanner = appScanner
         self.updateDetector = updateDetector
         self.installManager = installManager
     }
 
     func enableBackgroundUpdates() {
-        scheduleBackgroundTask()
-        isScheduled = true
+        if supportsBGTasks {
+            scheduleBackgroundTask()
+        }
+        isScheduled = supportsBGTasks
     }
 
     func disableBackgroundUpdates() {
-        cancelBackgroundTask()
+        if supportsBGTasks {
+            cancelBackgroundTask()
+        }
         isScheduled = false
     }
 
+    #if canImport(BackgroundTasks) && !os(macOS)
     private func registerBackgroundTask() {
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundTaskIdentifier, using: queue) { task in
-            self.handleBackgroundUpdateCheck(task: task as! BGAppRefreshTask)
-        }
+        BGTaskScheduler.shared
+            .register(forTaskWithIdentifier: backgroundTaskIdentifier, using: queue) { task in
+                self.handleBackgroundUpdateCheck(task: task as! BGAppRefreshTask)
+            }
     }
 
     private func scheduleBackgroundTask() {
@@ -97,6 +131,12 @@ class BackgroundScheduler: ObservableObject {
         let operationQueue = OperationQueue()
         operationQueue.addOperation(operation)
     }
+    #else
+    // Fallbacks for platforms without BackgroundTasks (e.g., macOS)
+    private func registerBackgroundTask() { /* no-op */ }
+    private func scheduleBackgroundTask() { /* no-op */ }
+    private func cancelBackgroundTask() { /* no-op */ }
+    #endif
 
     private func shouldRunBackgroundUpdate() -> Bool {
         // Check if device is plugged in
@@ -119,27 +159,30 @@ class BackgroundScheduler: ObservableObject {
     }
 
     private func isPluggedIn() -> Bool {
-        let powerSourceInfo = IOPSCopyPowerSourcesInfo()?.takeRetainedValue()
-        guard let powerSources = IOPSCopyPowerSourcesList(powerSourceInfo)?.takeRetainedValue() as? [CFTypeRef] else {
+        #if canImport(IOKit) && canImport(IOKit.ps)
+        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
+        else {
             return false
         }
 
-        for powerSource in powerSources {
-            guard let powerSourceDescription = IOPSGetPowerSourceDescription(powerSourceInfo, powerSource)?.takeUnretainedValue() as? [String: Any] else {
-                continue
-            }
-
-            if let isCharging = powerSourceDescription[kIOPSIsChargingKey] as? Bool,
-               let powerSourceState = powerSourceDescription[kIOPSPowerSourceStateKey] as? String {
-                return isCharging || powerSourceState == kIOPSACPowerValue
-            }
+        for ps in list {
+            guard let dict = IOPSGetPowerSourceDescription(blob, ps)?.takeUnretainedValue() as? [String: Any]
+            else { continue }
+            let isCharging = (dict[kIOPSIsChargingKey as String] as? Bool) ?? false
+            let state = dict[kIOPSPowerSourceStateKey as String] as? String
+            if isCharging || state == kIOPSACPowerValue { return true }
         }
-
         return false
+        #else
+        // If power source APIs are unavailable, assume not plugged in
+        return false
+        #endif
     }
 
     private func isOnWiFi() -> Bool {
-        return pathMonitor.currentPath.usesInterfaceType(.wifi)
+        // NWPathMonitor exposes currentPath on Apple platforms; guard just in case
+        pathMonitor.currentPath.status == .satisfied && pathMonitor.currentPath.usesInterfaceType(.wifi)
     }
 
     private func startNetworkMonitoring() {
@@ -147,7 +190,7 @@ class BackgroundScheduler: ObservableObject {
     }
 }
 
-class BackgroundUpdateOperation: Operation {
+class BackgroundUpdateOperation: Operation, @unchecked Sendable {
     private let appScanner: AppScanner?
     private let updateDetector: UpdateDetector?
     private let installManager: InstallManager?
@@ -156,11 +199,11 @@ class BackgroundUpdateOperation: Operation {
     private var _finished = false
 
     override var isExecuting: Bool {
-        return _executing
+        _executing
     }
 
     override var isFinished: Bool {
-        return _finished
+        _finished
     }
 
     init(appScanner: AppScanner?, updateDetector: UpdateDetector?, installManager: InstallManager?) {
@@ -201,76 +244,72 @@ class BackgroundUpdateOperation: Operation {
 
     @MainActor
     private func performBackgroundUpdate() async {
-        guard let appScanner = appScanner,
-              let updateDetector = updateDetector,
-              let installManager = installManager else {
+        guard let appScanner,
+              let updateDetector,
+              let installManager
+        else {
             print("Background update: Services not available")
             finish()
             return
         }
 
-        do {
-            print("Background update: Starting app scan")
-            let apps = await appScanner.scanInstalledApps()
+        print("Background update: Starting app scan")
+        let apps = await appScanner.scanInstalledApps()
 
-            guard !isCancelled else {
-                finish()
-                return
-            }
+        guard !isCancelled else {
+            finish()
+            return
+        }
 
-            print("Background update: Checking for updates")
-            let updates = await updateDetector.checkForUpdates(apps: apps)
+        print("Background update: Checking for updates")
+        let updates = await updateDetector.checkForUpdates(apps: apps)
 
-            guard !isCancelled else {
-                finish()
-                return
-            }
+        guard !isCancelled else {
+            finish()
+            return
+        }
 
-            // Filter updates based on user preferences
-            let filteredUpdates = filterUpdatesForBackground(updates)
+        // Filter updates based on user preferences
+        let filteredUpdates = filterUpdatesForBackground(updates)
 
-            if !filteredUpdates.isEmpty {
-                print("Background update: Installing \(filteredUpdates.count) updates")
+        if !filteredUpdates.isEmpty {
+            print("Background update: Installing \(filteredUpdates.count) updates")
 
-                for update in filteredUpdates {
-                    guard !isCancelled else {
-                        finish()
-                        return
-                    }
-
-                    do {
-                        try await installManager.installUpdate(update)
-                        print("Background update: Successfully updated \(update.appInfo.name)")
-                    } catch {
-                        print("Background update: Failed to update \(update.appInfo.name): \(error)")
-                    }
+            for update in filteredUpdates {
+                guard !isCancelled else {
+                    finish()
+                    return
                 }
 
-                // Send notification about completed updates
-                sendUpdateNotification(updatedApps: filteredUpdates.map { $0.appInfo.name })
-            } else {
-                print("Background update: No updates to install")
+                do {
+                    try await installManager.installUpdate(update)
+                    print("Background update: Successfully updated \(update.appInfo.name)")
+                } catch {
+                    print("Background update: Failed to update \(update.appInfo.name): \(error)")
+                }
             }
 
-            finish()
-
-        } catch {
-            print("Background update error: \(error)")
-            finish()
+            // Send notification about completed updates
+            sendUpdateNotification(updatedApps: filteredUpdates.map(\.appInfo.name))
+        } else {
+            print("Background update: No updates to install")
         }
+
+        finish()
     }
 
     private func filterUpdatesForBackground(_ updates: [UpdateInfo]) -> [UpdateInfo] {
         let securityOnly = UserDefaults.standard.bool(forKey: "securityUpdatesOnly")
 
         if securityOnly {
-            return updates.filter { $0.isSecurityUpdate }
+            return updates.filter(\.isSecurityUpdate)
         } else {
             return updates
         }
     }
 
     private func sendUpdateNotification(updatedApps: [String]) {
+        #if canImport(UserNotifications)
         let content = UNMutableNotificationContent()
         content.title = "Auto-Up"
 
@@ -289,10 +328,14 @@ class BackgroundUpdateOperation: Operation {
         )
 
         UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
+            if let error {
                 print("Error sending notification: \(error)")
             }
         }
+        #else
+        // Notifications not available on this platform
+        print("Notifications not available on this platform. Updated apps: \(updatedApps)")
+        #endif
     }
 }
 
@@ -300,8 +343,8 @@ class BackgroundUpdateOperation: Operation {
 
 extension BackgroundScheduler {
     func requestNotificationPermissions() async -> Bool {
+        #if canImport(UserNotifications)
         let center = UNUserNotificationCenter.current()
-
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
             return granted
@@ -309,11 +352,18 @@ extension BackgroundScheduler {
             print("Error requesting notification permissions: \(error)")
             return false
         }
+        #else
+        return false
+        #endif
     }
 
-    func checkNotificationPermissions() async -> UNAuthorizationStatus {
+    func checkNotificationPermissions() async -> Any {
+        #if canImport(UserNotifications)
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         return settings.authorizationStatus
+        #else
+        return "Unavailable"
+        #endif
     }
 }

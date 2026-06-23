@@ -1,5 +1,5 @@
-import Foundation
 import AppKit
+import Foundation
 
 @MainActor
 class AppScanner: ObservableObject {
@@ -9,7 +9,7 @@ class AppScanner: ObservableObject {
     private let fileManager = FileManager.default
     private let applicationsPaths = [
         "/Applications",
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path,
     ]
 
     func scanInstalledApps() async -> [AppInfo] {
@@ -63,17 +63,23 @@ class AppScanner: ObservableObject {
 
         do {
             let plistData = try Data(contentsOf: URL(fileURLWithPath: infoPlistPath))
-            guard let plist = try PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] else {
+            guard let plist = try PropertyListSerialization.propertyList(
+                from: plistData,
+                options: [],
+                format: nil
+            ) as? [String: Any] else {
                 return nil
             }
 
             // Extract basic info
             guard let bundleID = plist["CFBundleIdentifier"] as? String,
-                  let name = plist["CFBundleDisplayName"] as? String ?? plist["CFBundleName"] as? String else {
+                  let name = plist["CFBundleDisplayName"] as? String ?? plist["CFBundleName"] as? String
+            else {
                 return nil
             }
 
-            let version = plist["CFBundleShortVersionString"] as? String ?? plist["CFBundleVersion"] as? String ?? "Unknown"
+            let version = plist["CFBundleShortVersionString"] as? String ??
+                plist["CFBundleVersion"] as? String ?? "Unknown"
 
             // Get file modification date
             let attributes = try fileManager.attributesOfItem(atPath: path)
@@ -86,7 +92,9 @@ class AppScanner: ObservableObject {
             let iconPath = findAppIcon(appPath: path, plist: plist)
 
             // Check if it's a Homebrew app
-            let isHomebrew = path.contains("/opt/homebrew/") || checkIfHomebrewApp(bundleID: bundleID)
+            let isHomebrewByPath = path.contains("/opt/homebrew/")
+            let isHomebrewByCask = await checkIfHomebrewApp(bundleID: bundleID)
+            let isHomebrew = isHomebrewByPath || isHomebrewByCask
 
             // Try to determine GitHub repo
             let githubRepo = inferGitHubRepo(bundleID: bundleID, name: name)
@@ -135,24 +143,30 @@ class AppScanner: ObservableObject {
         return nil
     }
 
-    private func checkIfHomebrewApp(bundleID: String) -> Bool {
+    private func checkIfHomebrewApp(bundleID: String) async -> Bool {
         // Simple heuristic - check if app is in Homebrew casks
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
-        process.arguments = ["list", "--cask"]
+        let safeProcess = SafeProcess()
 
         do {
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            try process.run()
-            process.waitUntilExit()
+            // Check if brew is available
+            guard await safeProcess.isExecutableAvailable("brew") else {
+                return false
+            }
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
+            let result = try await safeProcess.execute(
+                executable: "brew",
+                arguments: ["list", "--cask"],
+                timeout: 30
+            )
+
+            guard result.isSuccess else {
+                return false
+            }
 
             // Basic matching - could be improved
-            return output.lowercased().contains(bundleID.lowercased()) ||
-                   output.lowercased().contains(bundleID.components(separatedBy: ".").last?.lowercased() ?? "")
+            let output = result.stdout.lowercased()
+            return output.contains(bundleID.lowercased()) ||
+                output.contains(bundleID.components(separatedBy: ".").last?.lowercased() ?? "")
         } catch {
             return false
         }
@@ -169,7 +183,7 @@ class AppScanner: ObservableObject {
             "com.raycast.macos": "raycast/raycast",
             "com.runningwithcrayons.Alfred": "alfred-app/alfred",
             "com.figma.Desktop": "figma/figma-api",
-            "com.tinyapp.TableFlip": "chockenberry/tableflip"
+            "com.tinyapp.TableFlip": "chockenberry/tableflip",
         ]
 
         if let repo = repoMapping[bundleID] {
@@ -183,7 +197,7 @@ class AppScanner: ObservableObject {
             let appName = components[2]
 
             // Check if domain looks like a GitHub username
-            if domain != "com" && domain != "org" && domain != "net" {
+            if domain != "com", domain != "org", domain != "net" {
                 return "\(domain)/\(appName.lowercased())"
             }
         }

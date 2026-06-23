@@ -7,14 +7,17 @@ class TahoeCompatibilityChecker: ObservableObject {
 
     init() {
         // Load Tahoe compatibility data
-        self.tahoeBreakers = Self.loadTahoeBreakers()
+        tahoeBreakers = Self.loadTahoeBreakers()
     }
 
     func checkCompatibility(for app: AppInfo) -> TahoeCompatibilityStatus {
         // Check if app is in the known incompatible list
         if let incompatibility = tahoeBreakers.first(where: { $0.matches(app) }) {
             if incompatibility.isVersionAffected(app.version) {
-                return .incompatible(reason: incompatibility.reason, fixedInVersion: incompatibility.fixedInVersion)
+                return .incompatible(
+                    reason: incompatibility.reason,
+                    fixedInVersion: incompatibility.fixedInVersion
+                )
             }
         }
 
@@ -32,7 +35,7 @@ class TahoeCompatibilityChecker: ObservableObject {
     }
 
     func filterIncompatibleUpdates(_ updates: [UpdateInfo]) -> [UpdateInfo] {
-        return updates.compactMap { update in
+        updates.compactMap { update in
             let status = checkCompatibility(for: update.appInfo)
 
             switch status {
@@ -62,8 +65,22 @@ class TahoeCompatibilityChecker: ObservableObject {
         let betaKeywords = ["beta", "alpha", "rc", "preview", "dev", "nightly"]
         let lowercaseVersion = version.lowercased()
 
-        return betaKeywords.contains { lowercaseVersion.contains($0) } ||
-               version.contains(try! NSRegularExpression(pattern: #"\d+\.\d+\.\d+-"#))
+        // If any keyword is present, it's considered a beta/pre-release
+        if betaKeywords.contains(where: { lowercaseVersion.contains($0) }) {
+            return true
+        }
+
+        // Additionally, detect semantic versions with a hyphen suffix (e.g., 1.2.3-beta, 1.2.3-0)
+        // Use NSRegularExpression to check for a hyphenated pre-release/build suffix per SemVer
+        let pattern = #"\b\d+\.\d+\.\d+-[A-Za-z0-9\.]+\b"#
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let range = NSRange(version.startIndex ..< version.endIndex, in: version)
+            if regex.firstMatch(in: version, options: [], range: range) != nil {
+                return true
+            }
+        }
+
+        return false
     }
 
     private func isVeryOldApp(_ app: AppInfo) -> Bool {
@@ -75,7 +92,7 @@ class TahoeCompatibilityChecker: ObservableObject {
         // In production, this would load from a JSON file or remote API
         // For now, return hardcoded known issues based on the PRD
 
-        return [
+        [
             TahoeIncompatibility(
                 bundleIDs: ["com.adobe.Lightroom"],
                 appNames: ["Adobe Lightroom Classic", "Adobe Lightroom"],
@@ -165,7 +182,7 @@ class TahoeCompatibilityChecker: ObservableObject {
                 reason: "Rendering pipeline crashes",
                 severity: .high,
                 source: "Unity Issue Tracker"
-            )
+            ),
         ]
     }
 }
@@ -180,10 +197,10 @@ struct TahoeIncompatibility {
     let source: String
 
     func matches(_ app: AppInfo) -> Bool {
-        return bundleIDs.contains(app.bundleID) ||
-               appNames.contains { appName in
-                   app.name.lowercased().contains(appName.lowercased())
-               }
+        bundleIDs.contains(app.bundleID) ||
+            appNames.contains { appName in
+                app.name.lowercased().contains(appName.lowercased())
+            }
     }
 
     func isVersionAffected(_ version: String) -> Bool {
@@ -201,7 +218,7 @@ struct TahoeIncompatibility {
 
     private func normalizeVersion(_ version: String) -> String {
         // Remove common prefixes and normalize format
-        return version
+        version
             .replacingOccurrences(of: "v", with: "")
             .replacingOccurrences(of: "version", with: "")
             .trimmingCharacters(in: .whitespaces)
@@ -209,34 +226,34 @@ struct TahoeIncompatibility {
 }
 
 enum TahoeIncompatibilitySeverity: String, CaseIterable {
-    case low = "low"
-    case medium = "medium"
-    case high = "high"
-    case critical = "critical"
+    case low
+    case medium
+    case high
+    case critical
 
     var description: String {
         switch self {
         case .low:
-            return "Minor issues"
+            "Minor issues"
         case .medium:
-            return "Moderate problems"
+            "Moderate problems"
         case .high:
-            return "Significant issues"
+            "Significant issues"
         case .critical:
-            return "App unusable"
+            "App unusable"
         }
     }
 
     var color: String {
         switch self {
         case .low:
-            return "yellow"
+            "yellow"
         case .medium:
-            return "orange"
+            "orange"
         case .high:
-            return "red"
+            "red"
         case .critical:
-            return "purple"
+            "purple"
         }
     }
 }
@@ -249,23 +266,23 @@ enum TahoeCompatibilityStatus {
     var isProblematic: Bool {
         switch self {
         case .compatible:
-            return false
+            false
         case .risky, .incompatible:
-            return true
+            true
         }
     }
 
     var description: String {
         switch self {
         case .compatible:
-            return "Compatible with macOS Tahoe"
+            "Compatible with macOS Tahoe"
         case .risky(let reason):
-            return "⚠️ Caution: \(reason)"
+            "⚠️ Caution: \(reason)"
         case .incompatible(let reason, let fixedVersion):
-            if let fixedVersion = fixedVersion {
-                return "❌ Incompatible: \(reason) (Fixed in v\(fixedVersion))"
+            if let fixedVersion {
+                "❌ Incompatible: \(reason) (Fixed in v\(fixedVersion))"
             } else {
-                return "❌ Incompatible: \(reason)"
+                "❌ Incompatible: \(reason)"
             }
         }
     }
@@ -306,7 +323,10 @@ extension TahoeCompatibilityChecker {
         // In production, this would fetch from a remote API
         // For MVP, we'll use the hardcoded list
         do {
-            let url = URL(string: "https://api.autoup.app/tahoe-breakers.json")!
+            guard let url = URL(string: "https://api.autoup.app/tahoe-breakers.json") else {
+                print("Invalid tahoe breakers API URL")
+                return
+            }
             let (data, _) = try await URLSession.shared.data(from: url)
             let remoteBreakers = try JSONDecoder().decode(TahoeBreakersList.self, from: data)
 
